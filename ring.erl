@@ -1,7 +1,14 @@
+%% Don't forget to set the maximum number of processes when opening
+%% the Erlang console: erl +P [ReallyBigNumber]
+
 -module(ring).
 -export([start/2, rpc/2]).
 
 start(N, M) ->
+  Max = erlang:system_info(process_limit),
+  io:format("Maximum allowed processes:~p~n" ,[Max]),
+  statistics(runtime),
+  statistics(wall_clock),
   %% Start the first process separately.
   FirstPid = spawn(fun() -> process_start(1, N, void) end),
   %% Send a message to the first process to start the message loop.
@@ -16,14 +23,14 @@ rpc(Pid, Request) ->
 
 %% Make a process's setup, and start it's loop.
 process_start(I, N, FirstPidOrig) ->
-  io:format("Starting process #~p/~p (~p).~n" ,[I, N, self()]),
+  %io:format("Starting process #~p/~p (~p).~n" ,[I, N, self()]),
   %% Determine the first process's id
   %% If I is 1, then the FirstPid is self(), otherwise it's what was provided.
   case I of
     1 -> FirstPid = self();
     _ -> FirstPid = FirstPidOrig
   end,
-  io:format("First pid is ~p in #~p/~p (~p).~n" ,[FirstPid, I, N, self()]),
+  %io:format("First pid is ~p in #~p/~p (~p).~n" ,[FirstPid, I, N, self()]),
   %% Start the next process, but just if it's not the end yet.
   case I of
     N ->
@@ -34,15 +41,15 @@ process_start(I, N, FirstPidOrig) ->
       %% Start the next process, providing an increased counter and the correct first process id.
       NextPid = spawn(fun() -> process_start(I+1, N, FirstPid) end)
   end,
-  io:format("Next pid is ~p in #~p/~p (~p).~n" ,[NextPid, I, N, self()]),
+  %io:format("Next pid is ~p in #~p/~p (~p).~n" ,[NextPid, I, N, self()]),
   %% Start this process's loop, providing the first and the next process's id.
   process(I, N, FirstPid, NextPid).
 
 process(I, N, FirstPid, NextPid) ->
   receive
     %% Receive a ring message.
-    {From, {message, J, M, Contents}=Z} ->
-      io:format("Received in #~p (~p) from ~p: ~p~n" ,[I, self(), From, Z]),
+    {_From, {message, J, M, Contents}=_Z} ->
+      %io:format("Received in #~p (~p) from ~p: ~p~n" ,[I, self(), From, Z]),
       %% Determine whether to increase the counter (so we know how many times the message has gone around).
       case I of
         %% This needs to be done just for the first element of the ring.
@@ -60,11 +67,17 @@ process(I, N, FirstPid, NextPid) ->
           NextPid ! {self(), {message, J2, M, Contents}}
       end,
       process(I, N, FirstPid, NextPid);
-    {From, cancel} ->
-      io:format("Received cancel in #~p (~p) from ~p~n" ,[I, self(), From]),
+    {_From, cancel} ->
+      %io:format("Received cancel in #~p (~p) from ~p~n" ,[I, self(), From]),
       case I of
         %% Simply stop if this is the Nth process.
-        N -> void;
+        N ->
+          {_, Time1} = statistics(runtime),
+          {_, Time2} = statistics(wall_clock),
+          U1 = Time1 * 1000 / N,
+          U2 = Time2 * 1000 / N,
+          io:format("Full time spent = ~p (~p)~n" , [Time1, Time2]),
+          io:format("Time for one process = ~p (~p) microseconds~n" , [U1, U2]);
         %% Also stop other processes if this is not the Nth.
         _ -> NextPid ! {self(), cancel}
       end;

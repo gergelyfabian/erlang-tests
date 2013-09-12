@@ -1,7 +1,14 @@
+%% Don't forget to set the maximum number of processes when opening
+%% the Erlang console: erl +P [ReallyBigNumber]
+
 -module(ring_dist).
 -export([start/3]).
 
 start(Node, N, M) ->
+  Max = erlang:system_info(process_limit),
+  io:format("Maximum allowed processes:~p~n" ,[Max]),
+  statistics(runtime),
+  statistics(wall_clock),
   %% Start the first process separately.
   FirstPid = spawn(fun() -> process_start({node(), Node}, 1, N, void) end),
   %% Send a message to the first process to start the message loop.
@@ -9,7 +16,7 @@ start(Node, N, M) ->
 
 %% Make a process's setup, and start it's loop.
 process_start(Nodes, I, N, FirstPidOrig) ->
-  io:format("Starting process #~p/~p (~p, ~p).~n" ,[I, N, self(), node()]),
+  %io:format("Starting process #~p/~p (~p, ~p).~n" ,[I, N, self(), node()]),
   %% Determine the first process's id
   %% If I is 1, then the FirstPid is self(), otherwise it's what was provided.
   case I of
@@ -39,8 +46,8 @@ process_start(Nodes, I, N, FirstPidOrig) ->
 process(I, N, FirstPid, NextPid) ->
   receive
     %% Receive a ring message.
-    {From, {message, J, M, Contents}=Z} ->
-      io:format("Received in #~p (~p, ~p) from ~p: ~p~n" ,[I, self(), node(), From, Z]),
+    {_From, {message, J, M, Contents}=_Z} ->
+      %io:format("Received in #~p (~p, ~p) from ~p: ~p~n" ,[I, self(), node(), From, Z]),
       %% Determine whether to increase the counter (so we know how many times the message has gone around).
       case I of
         %% This needs to be done just for the first element of the ring.
@@ -58,11 +65,17 @@ process(I, N, FirstPid, NextPid) ->
           NextPid ! {self(), {message, J2, M, Contents}}
       end,
       process(I, N, FirstPid, NextPid);
-    {From, cancel} ->
-      io:format("Received cancel in #~p (~p, ~p) from ~p~n" ,[I, self(), node(), From]),
+    {_From, cancel} ->
+      %io:format("Received cancel in #~p (~p, ~p) from ~p~n" ,[I, self(), node(), From]),
       case I of
-        %% Simply stop if this is the Nth process.
-        N -> void;
+        %% Simply stop if this is the Nth process, and also measure some statistics.
+        N ->
+          {_, Time1} = statistics(runtime),
+          {_, Time2} = statistics(wall_clock),
+          U1 = Time1 * 1000 / N,
+          U2 = Time2 * 1000 / N,
+          io:format("Full time spent = ~p (~p)~n" , [Time1, Time2]),
+          io:format("Time for one process = ~p (~p) microseconds~n" , [U1, U2]);
         %% Also stop other processes if this is not the Nth.
         _ -> NextPid ! {self(), cancel}
       end;
